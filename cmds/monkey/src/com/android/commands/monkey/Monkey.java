@@ -224,6 +224,17 @@ public class Monkey {
     /** The random number generator **/
     Random mRandom = null;
 
+    /**
+     * Rotation state snapshot taken before the run. The rotation events
+     * freeze/thaw the display rotation, which persists the auto-rotate setting;
+     * this snapshot is restored on exit so monkey does not leave the device
+     * with auto-rotate enabled when the user had rotation locked.
+     */
+    private boolean mAutoRotateInitiallyOn = true;
+
+    /** The user rotation to restore on exit. */
+    private int mInitialUserRotation = Surface.ROTATION_0;
+
     private final IMonkey mMonkeyService = createMonkeyService();
 
     /** Dropped-event statistics **/
@@ -732,12 +743,22 @@ public class Monkey {
         mNetworkMonitor.start();
         int crashedAtCycle = 0;
         try {
+            mAutoRotateInitiallyOn = !mWm.isRotationFrozen();
+            mInitialUserRotation = mWm.getDisplayUserRotation(Display.DEFAULT_DISPLAY);
+        } catch (RemoteException e) {
+            Logger.err.println("** Error: RemoteException while reading rotation state: "
+                    + e.getMessage());
+        }
+        try {
             crashedAtCycle = runMonkeyCycles();
         } finally {
-            // Release the rotation lock if it's still held and restore the
-            // original orientation.
-            new MonkeyRotationEvent(Surface.ROTATION_0, false).injectEvent(
-                mWm, mAm, mVerbose);
+            // Restore the rotation state the device was in before the run.
+            // thawRotation() persists auto-rotate ON, so unconditionally
+            // thawing here used to leave auto-rotate enabled even when the
+            // user had rotation locked before the run.
+            new MonkeyRotationEvent(
+                    mAutoRotateInitiallyOn ? Surface.ROTATION_0 : mInitialUserRotation,
+                    !mAutoRotateInitiallyOn).injectEvent(mWm, mAm, mVerbose);
         }
         mNetworkMonitor.stop();
 
